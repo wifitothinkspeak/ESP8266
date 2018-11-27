@@ -1,0 +1,120 @@
+/*
+ Aufgabe: Das Programm soll Co2-Sensoren (MHZ-14, MHZ-19) auslesen und die gewonnenen Daten mittels
+          Wlan an ThinkSpeak übertragen.
+          Das Programm ist für das D1 mini Board (ESP8266) gedacht.
+          Vor dem flashen des Chips müssen noch die Wlan- und ThinkSpeak-Einstellungen getätigt werden.
+ 
+ Datum:   27.11.2018
+   
+ Erstellt: Matthias Gärtner
+*/
+
+#include <ESP8266WiFi.h>
+#include <SoftwareSerial.h>
+
+// Sensor Einstellungen; identisch für MHZ-14 und MHZ-19 
+byte com[]={0xff,0x01,0x86,0x00,0x00,0x00,0x00,0x00,0x79};  //Befehl zum Auslesen der CO2 Konzentration
+byte return1[9];                                            //hier kommt der zurückgegeben Wert des ersten Sensors rein
+int co2;                                                    //CO2-Konzentration des ersten Sensors
+int mini;                                                   //Minimum-Wert des ersten Sensors
+int temp;                                                   //Temperatur-Wert des ersten Sensors
+byte status1;                                               //Status des ersten Sensors
+byte bit0;
+byte bit1;
+byte bit2;
+byte bit3;
+byte bit4;
+byte bit5;
+byte bit6;
+byte bit7;
+byte bit8;
+
+// Wlan Einstellungen
+const char* ssid = "xxxxxxx";                             // Netzwerkname des Wlans(SSID); ggf. anpassen
+const char* password = "xxxxxxxxxxxxxxxx";                // Passwort für das Wlan; ggf. anpassen  
+
+// ThingSpeak Einstellungen
+const int channelID = 635973;                             // channelID; ggf. anpassen
+String writeAPIKey = "8M12N3HXKGF6N3KB";                  // write API key für den ThingSpeak Kanal; ggf. anpassen
+const char* server = "api.thingspeak.com";
+const int postingInterval = 20 * 1000;                    // sendet die Daten alle 20 Sekunden
+
+WiFiClient client;                                        //initialisiert die client library
+
+
+
+void setup() {
+  Serial.begin(9600);                                     // Übertragungsgeschwindigkeit in bps
+  WiFi.begin(ssid, password);                             // Wlan Anmeldung wird initialisiert für WPA verschlüsselte Netze
+
+  while (WiFi.status() != WL_CONNECTED) {                 // WIFI.status() gibt den Verbindungsstatus zurück
+    delay(500);                                           // 500ms warten und dann erneut Verbindung prüfen
+  }
+}
+
+void loop() {
+  if (client.connect(server, 80)) {               // Client verbindet sich mit dem Server
+
+
+//Co2-Messung
+    if (Serial.available() >0) {                  //Hier wird der Buffer der Seriellen Schnittstelle gelehrt 
+        Serial.read();
+    }
+
+   Serial.write(com,9);                           //Befehl zum Auslesen der CO2 Konzentration
+   Serial.readBytes(return1,9);                   //Auslesen der Antwort
+   co2  = return1[2]*256+return1[3];              //Berechnung der Konzentration
+   temp = return1[4]-40;                          //Berechnung der Temperatur
+   mini = return1[6]*256+return1[7];              //Berechnung des Minimums
+   status1 = return1[5];                          //Berechnung des Status
+   bit0 = return1[0];
+   bit1 = return1[1];
+   bit2 = return1[2];
+   bit3 = return1[3];
+   bit4 = return1[4];
+   bit5 = return1[5];
+   bit6 = return1[6];
+   bit7 = return1[7];
+   bit8 = return1[8];
+
+
+// Ausgang serielle Schnittstelle / UART
+   Serial.print(" ; Sensor: Co2 = ");
+   Serial.print(co2);
+   Serial.print(" ; Temp = ");
+   Serial.print(temp);
+   Serial.print(" ; Minimum = ");
+   Serial.print(mini);
+   Serial.print(" ; Status = ");
+   Serial.print(status1);
+   Serial.println();
+                            
+
+// Generierung der Zeichenkette zur Übertragung / Construct API request body
+    String body = "field1=";                    // Daten werden in den body vom http post geschrieben
+           body += String(co2);
+           body += "&field2=";                  // anhängen von weiteren Werten mit "&..="
+           body += String(temp);
+           body += "&field3=";
+           body += String(status1);
+    
+ 
+
+//Daten zu ThingSpeak
+    client.println("POST /update HTTP/1.1");
+    client.println("Host: api.thingspeak.com");
+    client.println("Connection: close");
+    client.println("X-THINGSPEAKAPIKEY: " + writeAPIKey);
+    client.println("Content-Type: application/x-www-form-urlencoded");
+    client.println("Content-Length: " + String(body.length()));
+    client.println("");
+    client.print(body);                                                 
+
+  }
+  client.stop();        //schliesst die Übertragung
+
+delay(10);             // Pufferzeit da client.stop() nicht unmittelbar beendet wird
+ 
+// Deep sleep starten
+  ESP.deepSleep(postingInterval);
+}
